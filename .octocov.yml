@@ -1,0 +1,9 @@
+coverage:
+  paths:
+    - coverage.out
+  badge:
+    path: docs/coverage.svg
+
+push:
+  if: is_default_branch
+  message: "Update by octocov [skip ci]"
