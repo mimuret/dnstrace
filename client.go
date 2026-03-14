@@ -55,10 +55,10 @@ func (c *Client) ExchangeWithConnContext(ctx context.Context, m *dns.Msg, conn *
 			return c.base.ExchangeWithConnContext(ctx, m, conn)
 		}
 	}
-	carrier := NewDNSMsgCarrier(m)
-	c.propagator.Inject(ctx, carrier)
 	ctx, span := c.tracer.Start(ctx, c.operation)
 	defer span.End()
+	carrier := NewDNSMsgCarrier(m)
+	c.propagator.Inject(ctx, carrier)
 	for _, f := range c.requestFuncs {
 		f(span, m, conn.RemoteAddr().String(), conn.LocalAddr().String())
 	}
