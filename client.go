@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -24,59 +23,59 @@ func NewClient(operation string, base *dns.Client, opts ...Option) *Client {
 }
 
 type Client struct {
-	operation   string
-	base        *dns.Client
-	tracer      trace.Tracer
-	propagators propagation.TextMapPropagator
+	operation     string
+	base          *dns.Client
+	tracer        trace.Tracer
+	propagator    propagation.TextMapPropagator
+	requestFuncs  []RequestFunc
+	responseFuncs []ResponseFunc
+
+	filters       []Filter
+	startSpanOpts []trace.SpanStartOption
 }
 
 func (c *Client) applyConfig(config *config) {
 	c.tracer = config.tracer
-	c.propagators = config.propagators
-}
-
-func (c *Client) prepareSpan(span trace.Span, m *dns.Msg) {
-	if len(m.Question) > 0 {
-		qname := m.Question[0].Name
-		qtype := dns.TypeToString[m.Question[0].Qtype]
-		span.SetAttributes(
-			semconv.DNSQuestionName(qname),
-			attribute.String("dns.request.type", qtype),
-		)
-	}
-}
-
-func (c *Client) afterSpan(span trace.Span, r *dns.Msg, rtt time.Duration, err error) {
-	if err != nil {
-		return
-	}
-	if r == nil {
-		return
-	}
-	rcode := dns.RcodeToString[r.Rcode]
-	span.SetAttributes(
-		attribute.String("dns.response.code", rcode),
-	)
+	c.propagator = config.propagator
+	c.requestFuncs = config.requestFuncs
+	c.responseFuncs = config.responseFuncs
+	c.filters = config.filters
+	c.startSpanOpts = config.spanStartOpts
 }
 
 func (c *Client) ExchangeContext(ctx context.Context, m *dns.Msg, a string) (r *dns.Msg, rtt time.Duration, err error) {
-	carrier := NewDNSMsgCarrier(m)
-	c.propagators.Inject(ctx, carrier)
-	ctx, span := c.tracer.Start(ctx, c.operation)
-	defer span.End()
-	c.prepareSpan(span, m)
-	r, rtt, err = c.base.ExchangeContext(ctx, m, a)
-	c.afterSpan(span, r, rtt, err)
-	return r, rtt, err
+	conn, err := c.base.DialContext(ctx, a)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = conn.Close() }()
+	return c.ExchangeWithConnContext(ctx, m, conn)
 }
 
 func (c *Client) ExchangeWithConnContext(ctx context.Context, m *dns.Msg, conn *dns.Conn) (r *dns.Msg, rtt time.Duration, err error) {
-	carrier := NewDNSMsgCarrier(m)
-	c.propagators.Inject(ctx, carrier)
-	ctx, span := c.tracer.Start(ctx, c.operation)
+	for _, filter := range c.filters {
+		if filter(m) {
+			return c.base.ExchangeWithConnContext(ctx, m, conn)
+		}
+	}
+	tracer := c.tracer
+	if tracer == nil {
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			tracer = newTracer(span.TracerProvider())
+		} else {
+			tracer = newTracer(otel.GetTracerProvider())
+		}
+	}
+	ctx, span := tracer.Start(ctx, c.operation, c.startSpanOpts...)
 	defer span.End()
-	c.prepareSpan(span, m)
+	carrier := NewDNSMsgCarrier(m)
+	c.propagator.Inject(ctx, carrier)
+	for _, f := range c.requestFuncs {
+		f(span, m, conn.RemoteAddr().String(), conn.LocalAddr().String())
+	}
 	r, rtt, err = c.base.ExchangeWithConnContext(ctx, m, conn)
-	c.afterSpan(span, r, rtt, err)
+	for _, f := range c.responseFuncs {
+		f(span, r, rtt, err)
+	}
 	return r, rtt, err
 }

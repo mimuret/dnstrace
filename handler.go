@@ -5,12 +5,11 @@ package dnstrace
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/miekg/dns"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -30,41 +29,46 @@ func NewHandler(operation string, base Handler, opts ...Option) dns.Handler {
 
 func (h *handler) applyConfig(c *config) {
 	h.tracer = c.tracer
-	h.propagators = c.propagators
+	h.propagator = c.propagator
+	h.responseFuncs = c.responseFuncs
+	h.requestFuncs = c.requestFuncs
+	h.filters = c.filters
+	h.spanStartOpts = c.spanStartOpts
 }
 
 type handler struct {
-	operation   string
-	base        Handler
-	tracer      trace.Tracer
-	propagators propagation.TextMapPropagator
+	operation     string
+	base          Handler
+	tracer        trace.Tracer
+	propagator    propagation.TextMapPropagator
+	requestFuncs  []RequestFunc
+	responseFuncs []ResponseFunc
+	filters       []Filter
+	spanStartOpts []trace.SpanStartOption
 }
 
 func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	var (
-		qname string
-		qtype string
-		opts  []trace.SpanStartOption
-	)
-	ctx := context.Background()
-	ctx = h.propagators.Extract(ctx, NewDNSMsgCarrier(r))
-	if len(r.Question) > 0 {
-		qname = r.Question[0].Name
-		qtype = dns.TypeToString[r.Question[0].Qtype]
-		opts = append(opts, trace.WithAttributes(
-			semconv.DNSQuestionName(qname),
-			attribute.String("dns.query.type", qtype),
-		))
+	for _, filter := range h.filters {
+		if filter(r) {
+			h.base.ServeDNSWithContext(context.Background(), w, r)
+			return
+		}
 	}
+
+	ctx := context.Background()
+	ctx = h.propagator.Extract(ctx, NewDNSMsgCarrier(r))
 
 	tracer := h.tracer
 
 	if tracer == nil {
-		tracer = otel.Tracer("dnstrace")
+		tracer = newTracer(otel.GetTracerProvider())
 	}
 
-	ctx, span := tracer.Start(ctx, h.operation, opts...)
+	ctx, span := tracer.Start(ctx, h.operation, h.spanStartOpts...)
 	defer span.End()
+	for _, f := range h.requestFuncs {
+		f(span, r, w.LocalAddr().String(), w.RemoteAddr().String())
+	}
 
 	// Wrap w to use our ResponseWriter methods while also exposing
 	// other interfaces that w may implement (http.CloseNotifier,
@@ -73,15 +77,14 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	rww := &responseWriter{
 		ResponseWriter: w,
 	}
-
+	start := time.Now()
 	h.base.ServeDNSWithContext(ctx, rww, r)
+	elapsed := time.Since(start)
 
-	if rww.msg != nil {
-		rcode := dns.RcodeToString[rww.msg.Rcode]
-		span.SetAttributes(
-			attribute.String("dns.response.code", rcode),
-		)
+	for _, f := range h.responseFuncs {
+		f(span, rww.msg, elapsed, rww.err)
 	}
+
 }
 
 var _ dns.ResponseWriter = (*responseWriter)(nil)
@@ -89,6 +92,7 @@ var _ dns.ResponseWriter = (*responseWriter)(nil)
 type responseWriter struct {
 	dns.ResponseWriter
 	msg *dns.Msg
+	err error
 }
 
 func (w *responseWriter) LocalAddr() net.Addr {
@@ -99,9 +103,10 @@ func (w *responseWriter) RemoteAddr() net.Addr {
 	return w.ResponseWriter.RemoteAddr()
 }
 
-func (w *responseWriter) WriteMsg(m *dns.Msg) (err error) {
+func (w *responseWriter) WriteMsg(m *dns.Msg) error {
 	w.msg = m
-	return w.ResponseWriter.WriteMsg(m)
+	w.err = w.ResponseWriter.WriteMsg(m)
+	return w.err
 }
 
 func (w *responseWriter) Write(m []byte) (int, error) {

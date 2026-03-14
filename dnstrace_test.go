@@ -10,9 +10,11 @@ import (
 
 	"github.com/miekg/dns"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/nettest"
 )
@@ -36,7 +38,7 @@ func (s *testHandler) ServeDNSWithContext(ctx context.Context, w dns.ResponseWri
 	_ = w.WriteMsg(m)
 }
 
-func startServer() (*dns.Server, net.Listener, error) {
+func startServerWithOptions(opts ...Option) (*dns.Server, net.Listener, error) {
 	ln, err := nettest.NewLocalListener("tcp")
 	if err != nil {
 		return nil, nil, err
@@ -44,7 +46,7 @@ func startServer() (*dns.Server, net.Listener, error) {
 
 	server := dns.Server{
 		Listener: ln,
-		Handler:  NewHandler("dnstrace-test", th, WithTracer(otel.Tracer("dnstrace-test"))),
+		Handler:  NewHandler("dnstrace-test", th, opts...),
 	}
 	go func() {
 		_ = server.ActivateAndServe()
@@ -52,22 +54,55 @@ func startServer() (*dns.Server, net.Listener, error) {
 	return &server, ln, nil
 }
 
-func TestHandler(t *testing.T) {
-	tracerProvider, err := newTracerProvider()
-	if err != nil {
-		t.Fatal(err)
-	}
-	otel.SetTracerProvider(tracerProvider)
-	prop := newPropagator()
-	otel.SetTextMapPropagator(prop)
+func setupOTel(t *testing.T, tp trace.TracerProvider) {
+	t.Helper()
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(newPropagator())
+}
 
-	server, ln, err := startServer()
+func setupStdoutOTel(t *testing.T) *sdktrace.TracerProvider {
+	t.Helper()
+	tp, err := newTracerProvider()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
+	setupOTel(t, tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+	})
+	return tp
+}
+
+func setupRecordedOTel(t *testing.T) (*sdktrace.TracerProvider, *tracetest.SpanRecorder) {
+	t.Helper()
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	setupOTel(t, tp)
+	return tp, sr
+}
+
+func startTestServer(t *testing.T, opts ...Option) net.Listener {
+	t.Helper()
+	server, ln, err := startServerWithOptions(opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
 		_ = server.Shutdown()
-	}()
+	})
+	return ln
+}
+
+func newTestClient(tp *sdktrace.TracerProvider, opts ...Option) *Client {
+	baseOpts := []Option{WithTracer(tp.Tracer("client"))}
+	baseOpts = append(baseOpts, opts...)
+	return NewClient("sent-query", &dns.Client{Net: "tcp"}, baseOpts...)
+}
+
+// TestHandler verifies that the handler itself does not add EDNS0 trace options to responses.
+func TestHandler(t *testing.T) {
+	_ = setupStdoutOTel(t)
+	ln := startTestServer(t, WithTracer(otel.Tracer("dnstrace-test")))
 	client := &dns.Client{
 		Net: "tcp",
 	}
@@ -85,22 +120,10 @@ func TestHandler(t *testing.T) {
 	}
 }
 
+// TestClient verifies that the client injects EDNS0 trace context and preserves tracestate.
 func TestClient(t *testing.T) {
-	tracerProvider, err := newTracerProvider()
-	if err != nil {
-		t.Fatal(err)
-	}
-	otel.SetTracerProvider(tracerProvider)
-	prop := newPropagator()
-	otel.SetTextMapPropagator(prop)
-
-	server, ln, err := startServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = server.Shutdown()
-	}()
+	tracerProvider := setupStdoutOTel(t)
+	ln := startTestServer(t, WithTracer(otel.Tracer("dnstrace-test")))
 
 	client := NewClient("sent-query", &dns.Client{
 		Net: "tcp",
@@ -141,7 +164,7 @@ func TestClient(t *testing.T) {
 	defer span.End()
 
 	for _, tc := range testcase {
-		_, _, err = client.ExchangeContext(ctx, tc.m, ln.Addr().String())
+		_, _, err := client.ExchangeContext(ctx, tc.m, ln.Addr().String())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,6 +188,295 @@ func TestClient(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestClientFilterSkipsTraceContextAndSetsDefaultAttributes verifies filter skip behavior and default attributes for traced requests.
+func TestClientFilterSkipsTraceContextAndSetsDefaultAttributes(t *testing.T) {
+	tp, sr := setupRecordedOTel(t)
+	ln := startTestServer(t, WithTracer(tp.Tracer("server")))
+
+	client := newTestClient(tp,
+		WithFilters(func(m *dns.Msg) bool {
+			return len(m.Question) > 0 && m.Question[0].Name == "filtered.example."
+		}),
+	)
+
+	ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+
+	filtered := new(dns.Msg)
+	filtered.SetQuestion("filtered.example.", dns.TypeA)
+	_, _, err := client.ExchangeContext(ctx, filtered, ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if traceOpt := GetEDNS0_TRACE(th.req); traceOpt != nil {
+		t.Fatal("filtered request must not have EDNS0_TRACE")
+	}
+
+	unfiltered := new(dns.Msg)
+	unfiltered.SetQuestion("example.com.", dns.TypeA)
+	_, _, err = client.ExchangeContext(ctx, unfiltered, ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if traceOpt := GetEDNS0_TRACE(th.req); traceOpt == nil {
+		t.Fatal("unfiltered request must have EDNS0_TRACE")
+	}
+
+	span.End()
+
+	clientSpans := findSpansByName(sr.Ended(), "sent-query")
+	if len(clientSpans) != 1 {
+		t.Fatalf("expected 1 client span for unfiltered request, got %d", len(clientSpans))
+	}
+	assertHasDefaultAttributes(t, clientSpans[0])
+}
+
+// TestHandlerFilterSkipsTraceContextAndSetsDefaultAttributes verifies handler-side filter skip behavior and default attributes for traced requests.
+func TestHandlerFilterSkipsTraceContextAndSetsDefaultAttributes(t *testing.T) {
+	tp, sr := setupRecordedOTel(t)
+
+	ln := startTestServer(t,
+		WithTracer(tp.Tracer("handler")),
+		WithFilters(func(m *dns.Msg) bool {
+			return len(m.Question) > 0 && m.Question[0].Name == "filtered.example."
+		}),
+	)
+
+	client := newTestClient(tp)
+	ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+
+	filtered := new(dns.Msg)
+	filtered.SetQuestion("filtered.example.", dns.TypeA)
+	_, _, err := client.ExchangeContext(ctx, filtered, ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.SpanFromContext(th.ctx).SpanContext().IsValid() {
+		t.Fatal("filtered request must not carry trace context into handler context")
+	}
+
+	unfiltered := new(dns.Msg)
+	unfiltered.SetQuestion("example.com.", dns.TypeA)
+	_, _, err = client.ExchangeContext(ctx, unfiltered, ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trace.SpanFromContext(th.ctx).SpanContext().IsValid() {
+		t.Fatal("unfiltered request must carry trace context into handler context")
+	}
+
+	span.End()
+
+	handlerSpans := findSpansByName(sr.Ended(), "dnstrace-test")
+	if len(handlerSpans) != 1 {
+		t.Fatalf("expected 1 handler span for unfiltered request, got %d", len(handlerSpans))
+	}
+	assertHasDefaultAttributes(t, handlerSpans[0])
+}
+
+// TestClientFiltersShortCircuitAndAllPass verifies client filter short-circuit behavior and non-matching tracing behavior.
+func TestClientFiltersShortCircuitAndAllPass(t *testing.T) {
+	t.Run("short-circuit on true", func(t *testing.T) {
+		tp, sr := setupRecordedOTel(t)
+		ln := startTestServer(t, WithTracer(tp.Tracer("server")))
+
+		firstCalled := 0
+		secondCalled := 0
+		client := newTestClient(tp,
+			WithFilters(func(m *dns.Msg) bool {
+				firstCalled++
+				return true
+			}),
+			WithFilters(func(m *dns.Msg) bool {
+				secondCalled++
+				return true
+			}),
+		)
+
+		ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+		defer span.End()
+
+		m := new(dns.Msg)
+		m.SetQuestion("example.com.", dns.TypeA)
+		_, _, err := client.ExchangeContext(ctx, m, ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstCalled != 1 {
+			t.Fatalf("expected first filter to be called once, got %d", firstCalled)
+		}
+		if secondCalled != 0 {
+			t.Fatalf("expected second filter to not be called, got %d", secondCalled)
+		}
+		if traceOpt := GetEDNS0_TRACE(th.req); traceOpt != nil {
+			t.Fatal("short-circuited request must not have EDNS0_TRACE")
+		}
+
+		clientSpans := findSpansByName(sr.Ended(), "sent-query")
+		if len(clientSpans) != 0 {
+			t.Fatalf("expected 0 client spans for short-circuited request, got %d", len(clientSpans))
+		}
+	})
+
+	t.Run("all filters false", func(t *testing.T) {
+		tp, sr := setupRecordedOTel(t)
+		ln := startTestServer(t, WithTracer(tp.Tracer("server")))
+
+		firstCalled := 0
+		secondCalled := 0
+		client := newTestClient(tp,
+			WithFilters(func(m *dns.Msg) bool {
+				firstCalled++
+				return false
+			}),
+			WithFilters(func(m *dns.Msg) bool {
+				secondCalled++
+				return false
+			}),
+		)
+
+		ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+		defer span.End()
+
+		m := new(dns.Msg)
+		m.SetQuestion("example.com.", dns.TypeA)
+		_, _, err := client.ExchangeContext(ctx, m, ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstCalled != 1 || secondCalled != 1 {
+			t.Fatalf("expected both filters to be called once, got first=%d second=%d", firstCalled, secondCalled)
+		}
+		if traceOpt := GetEDNS0_TRACE(th.req); traceOpt == nil {
+			t.Fatal("non-matching request must have EDNS0_TRACE")
+		}
+
+		clientSpans := findSpansByName(sr.Ended(), "sent-query")
+		if len(clientSpans) != 1 {
+			t.Fatalf("expected 1 client span for non-matching request, got %d", len(clientSpans))
+		}
+		assertHasDefaultAttributes(t, clientSpans[0])
+	})
+}
+
+// TestHandlerFiltersShortCircuitAndAllPass verifies handler filter short-circuit behavior and non-matching tracing behavior.
+func TestHandlerFiltersShortCircuitAndAllPass(t *testing.T) {
+	t.Run("short-circuit on true", func(t *testing.T) {
+		tp, sr := setupRecordedOTel(t)
+
+		firstCalled := 0
+		secondCalled := 0
+		ln := startTestServer(t,
+			WithTracer(tp.Tracer("handler")),
+			WithFilters(func(m *dns.Msg) bool {
+				firstCalled++
+				return true
+			}),
+			WithFilters(func(m *dns.Msg) bool {
+				secondCalled++
+				return true
+			}),
+		)
+
+		client := newTestClient(tp)
+		ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+		defer span.End()
+
+		m := new(dns.Msg)
+		m.SetQuestion("example.com.", dns.TypeA)
+		_, _, err := client.ExchangeContext(ctx, m, ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstCalled != 1 {
+			t.Fatalf("expected first filter to be called once, got %d", firstCalled)
+		}
+		if secondCalled != 0 {
+			t.Fatalf("expected second filter to not be called, got %d", secondCalled)
+		}
+		if trace.SpanFromContext(th.ctx).SpanContext().IsValid() {
+			t.Fatal("short-circuited request must not carry trace context into handler context")
+		}
+
+		handlerSpans := findSpansByName(sr.Ended(), "dnstrace-test")
+		if len(handlerSpans) != 0 {
+			t.Fatalf("expected 0 handler spans for short-circuited request, got %d", len(handlerSpans))
+		}
+	})
+
+	t.Run("all filters false", func(t *testing.T) {
+		tp, sr := setupRecordedOTel(t)
+
+		firstCalled := 0
+		secondCalled := 0
+		ln := startTestServer(t,
+			WithTracer(tp.Tracer("handler")),
+			WithFilters(func(m *dns.Msg) bool {
+				firstCalled++
+				return false
+			}),
+			WithFilters(func(m *dns.Msg) bool {
+				secondCalled++
+				return false
+			}),
+		)
+
+		client := newTestClient(tp)
+		ctx, span := tp.Tracer("test").Start(context.Background(), "parent")
+		defer span.End()
+
+		m := new(dns.Msg)
+		m.SetQuestion("example.com.", dns.TypeA)
+		_, _, err := client.ExchangeContext(ctx, m, ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstCalled != 1 || secondCalled != 1 {
+			t.Fatalf("expected both filters to be called once, got first=%d second=%d", firstCalled, secondCalled)
+		}
+		if !trace.SpanFromContext(th.ctx).SpanContext().IsValid() {
+			t.Fatal("non-matching request must carry trace context into handler context")
+		}
+
+		handlerSpans := findSpansByName(sr.Ended(), "dnstrace-test")
+		if len(handlerSpans) != 1 {
+			t.Fatalf("expected 1 handler span for non-matching request, got %d", len(handlerSpans))
+		}
+		assertHasDefaultAttributes(t, handlerSpans[0])
+	})
+}
+
+func findSpansByName(spans []sdktrace.ReadOnlySpan, name string) []sdktrace.ReadOnlySpan {
+	filtered := make([]sdktrace.ReadOnlySpan, 0, len(spans))
+	for _, s := range spans {
+		if s.Name() == name {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
+func assertHasDefaultAttributes(t *testing.T, span sdktrace.ReadOnlySpan) {
+	t.Helper()
+	if !hasAttribute(span.Attributes(), "dns.question.name") {
+		t.Fatal("default request attribute dns.question.name is missing")
+	}
+	if !hasAttribute(span.Attributes(), "dns.request.type") {
+		t.Fatal("default request attribute dns.request.type is missing")
+	}
+	if !hasAttribute(span.Attributes(), "dns.response.code") {
+		t.Fatal("default response attribute dns.response.code is missing")
+	}
+}
+
+func hasAttribute(attrs []attribute.KeyValue, key string) bool {
+	for _, a := range attrs {
+		if string(a.Key) == key {
+			return true
+		}
+	}
+	return false
 }
 
 func newPropagator() propagation.TextMapPropagator {
