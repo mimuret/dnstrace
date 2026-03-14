@@ -50,21 +50,21 @@ func newConfig(opts []Option) *config {
 	return c
 }
 
-// WithTracer Withs the tracer to use for spans created by the handler.
+// WithTracer sets the tracer to use for spans created by the handler.
 func WithTracer(tracer trace.Tracer) Option {
 	return func(c *config) {
 		c.tracer = tracer
 	}
 }
 
-// WithPropagator Withs the propagator to use for extracting and injecting trace context from/to DNS messages.
+// WithPropagator sets the propagator to use for extracting and injecting trace context from/to DNS messages.
 func WithPropagator(propagator propagation.TextMapPropagator) Option {
 	return func(c *config) {
 		c.propagator = propagator
 	}
 }
 
-// SetSpanStartOpts Withs the options to use when starting a span.
+// SetSpanStartOpts sets the options to use when starting a span.
 func SetSpanStartOpts(opts ...trace.SpanStartOption) Option {
 	return func(c *config) {
 		c.spanStartOpts = append(c.spanStartOpts, opts...)
