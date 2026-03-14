@@ -37,12 +37,13 @@ EDNS0_TRACEは、EDNS0のPrivate用のOption Code 0xFDE9 を使ってtraceparent
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+--+
 ```
 
-- <OPTION-CODE>: EDNS0のオプションコード
-- <VERSION>: traceparentのversion
-- <TRACE-ID>: traceparentのtrace-id
-- <SPAN-ID>: traceparentのspan-id
-- <TRACE-FLAGS>: traceparentのtrace-flags
-- <TRACE-STATE>: tracestateのASCII文字列
+- `OPTION-CODE`: EDNS0のオプションコード
+- `OPTION-LENGTH`: EDNS0オプションの長さ
+- `VERSION`: traceparentのversion
+- `TRACE-FLAGS`: traceparentのtrace-flags
+- `TRACE-ID`: traceparentのtrace-id
+- `SPAN-ID`: traceparentのspan-id
+- `TRACE-STATE`: tracestateのASCII文字列
 
 traceparent, tracestateのフォーマットは[Trace Context](https://www.w3.org/TR/trace-context/)に準拠します。
 

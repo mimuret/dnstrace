@@ -34,15 +34,16 @@ EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using EDN
 |                                                               |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 |                       TRACE-STATE...                          |
-+---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+--+
++---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 ```
 
-- <OPTION-CODE>: EDNS0 option code
-- <VERSION>: traceparent version
-- <TRACE-ID>: traceparent trace-id
-- <SPAN-ID>: traceparent span-id
-- <TRACE-FLAGS>: traceparent trace-flags
-- <TRACE-STATE>: ASCII string for tracestate
+- `OPTION-CODE`: EDNS0 option code0
+- `OPTION-LENGTH`: EDNS0 option length
+- `VERSION`: traceparent version
+- `TRACE-FLAGS`: traceparent trace-flags
+- `TRACE-ID`: traceparent trace-id
+- `SPAN-ID`: traceparent span-id
+- `TRACE-STATE`: ASCII string for tracestate
 
 `traceparent` and `tracestate` follow the [Trace Context](https://www.w3.org/TR/trace-context/) specification.
 
