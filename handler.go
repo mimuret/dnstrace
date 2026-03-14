@@ -5,6 +5,7 @@ package dnstrace
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/miekg/dns"
 	"go.opentelemetry.io/otel/propagation"
@@ -75,10 +76,12 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	rww := &responseWriter{
 		ResponseWriter: w,
 	}
+	start := time.Now()
 	h.base.ServeDNSWithContext(ctx, rww, r)
+	elapsed := time.Since(start)
 
 	for _, f := range h.responseFuncs {
-		f(span, rww.msg, 0, rww.err)
+		f(span, rww.msg, elapsed, rww.err)
 	}
 
 }
