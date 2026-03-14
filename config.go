@@ -16,7 +16,7 @@ type Option func(*config)
 // Filter returns true when the message should be skipped from tracing.
 type Filter func(m *dns.Msg) bool
 
-type RequestFunc func(span trace.Span, m *dns.Msg, serverAppendr string, clientAppendr string)
+type RequestFunc func(span trace.Span, m *dns.Msg, serverAddr string, clientAddr string)
 
 type ResponseFunc func(span trace.Span, r *dns.Msg, rtt time.Duration, err error)
 
