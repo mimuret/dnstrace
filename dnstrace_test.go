@@ -196,7 +196,7 @@ func TestClientFilterSkipsTraceContextAndSetsDefaultAttributes(t *testing.T) {
 	ln := startTestServer(t, WithTracer(tp.Tracer("server")))
 
 	client := newTestClient(tp,
-		AppendFilter(func(m *dns.Msg) bool {
+		WithFilters(func(m *dns.Msg) bool {
 			return len(m.Question) > 0 && m.Question[0].Name == "filtered.example."
 		}),
 	)
@@ -238,7 +238,7 @@ func TestHandlerFilterSkipsTraceContextAndSetsDefaultAttributes(t *testing.T) {
 
 	ln := startTestServer(t,
 		WithTracer(tp.Tracer("handler")),
-		AppendFilter(func(m *dns.Msg) bool {
+		WithFilters(func(m *dns.Msg) bool {
 			return len(m.Question) > 0 && m.Question[0].Name == "filtered.example."
 		}),
 	)
@@ -284,11 +284,11 @@ func TestClientFiltersShortCircuitAndAllPass(t *testing.T) {
 		firstCalled := 0
 		secondCalled := 0
 		client := newTestClient(tp,
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				firstCalled++
 				return true
 			}),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				secondCalled++
 				return true
 			}),
@@ -326,11 +326,11 @@ func TestClientFiltersShortCircuitAndAllPass(t *testing.T) {
 		firstCalled := 0
 		secondCalled := 0
 		client := newTestClient(tp,
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				firstCalled++
 				return false
 			}),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				secondCalled++
 				return false
 			}),
@@ -369,11 +369,11 @@ func TestHandlerFiltersShortCircuitAndAllPass(t *testing.T) {
 		secondCalled := 0
 		ln := startTestServer(t,
 			WithTracer(tp.Tracer("handler")),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				firstCalled++
 				return true
 			}),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				secondCalled++
 				return true
 			}),
@@ -412,11 +412,11 @@ func TestHandlerFiltersShortCircuitAndAllPass(t *testing.T) {
 		secondCalled := 0
 		ln := startTestServer(t,
 			WithTracer(tp.Tracer("handler")),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				firstCalled++
 				return false
 			}),
-			AppendFilter(func(m *dns.Msg) bool {
+			WithFilters(func(m *dns.Msg) bool {
 				secondCalled++
 				return false
 			}),

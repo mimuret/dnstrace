@@ -31,6 +31,7 @@ func (h *handler) applyConfig(c *config) {
 	h.responseFuncs = c.responseFuncs
 	h.requestFuncs = c.requestFuncs
 	h.filters = c.filters
+	h.spanStartOpts = c.spanStartOpts
 }
 
 type handler struct {
@@ -41,12 +42,10 @@ type handler struct {
 	requestFuncs  []RequestFunc
 	responseFuncs []ResponseFunc
 	filters       []Filter
+	spanStartOpts []trace.SpanStartOption
 }
 
 func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	var (
-		opts []trace.SpanStartOption
-	)
 	for _, filter := range h.filters {
 		if filter(r) {
 			h.base.ServeDNSWithContext(context.Background(), w, r)
@@ -63,7 +62,7 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		tracer = newTracer()
 	}
 
-	ctx, span := tracer.Start(ctx, h.operation, opts...)
+	ctx, span := tracer.Start(ctx, h.operation, h.spanStartOpts...)
 	defer span.End()
 	for _, f := range h.requestFuncs {
 		f(span, r, w.LocalAddr().String(), w.RemoteAddr().String())

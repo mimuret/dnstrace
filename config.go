@@ -31,6 +31,8 @@ type config struct {
 	responseFuncs []ResponseFunc
 	// filters are used to skip tracing for matched messages (filter returns true).
 	filters []Filter
+	// spanStartOpts are used to set options when starting a span.
+	spanStartOpts []trace.SpanStartOption
 }
 
 func newConfig(opts []Option) *config {
@@ -40,6 +42,7 @@ func newConfig(opts []Option) *config {
 		requestFuncs:  []RequestFunc{SetRequestAttributes},
 		responseFuncs: []ResponseFunc{SetResponseAttributes},
 		filters:       nil,
+		spanStartOpts: nil,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -61,37 +64,44 @@ func WithPropagator(propagator propagation.TextMapPropagator) Option {
 	}
 }
 
-// WithRequestFuncs Withs the functions to use for updating the span using the request message before processing is completed.
-func WithRequestFuncs(fns ...RequestFunc) Option {
+// SetSpanStartOpts Withs the options to use when starting a span.
+func SetSpanStartOpts(opts ...trace.SpanStartOption) Option {
 	return func(c *config) {
-		c.requestFuncs = fns
+		c.spanStartOpts = append(c.spanStartOpts, opts...)
 	}
 }
 
-// WithResponseFuncs Withs the functions to use for updating the span using the response message after processing is completed.
-func WithResponseFuncs(fns ...ResponseFunc) Option {
+// WithFilters appends filters used to skip tracing for matched messages (filter returns true).
+func WithFilters(filters ...Filter) Option {
 	return func(c *config) {
-		c.responseFuncs = fns
+		c.filters = append(c.filters, filters...)
 	}
 }
 
-// AppendRequestFunc Appends functions to use for updating the span using the request message before processing is completed.
-func AppendRequestFunc(f ...RequestFunc) Option {
+// WithRequestFuncs Withs functions to use for updating the span using the request message before processing is completed.
+func WithRequestFuncs(f ...RequestFunc) Option {
 	return func(c *config) {
 		c.requestFuncs = append(c.requestFuncs, f...)
 	}
 }
 
-// AppendResponseFunc Appends functions to use for updating the span using the response message after processing is completed.
-func AppendResponseFunc(f ...ResponseFunc) Option {
+// WithResponseFuncs Withs functions to use for updating the span using the response message after processing is completed.
+func WithResponseFuncs(f ...ResponseFunc) Option {
 	return func(c *config) {
 		c.responseFuncs = append(c.responseFuncs, f...)
 	}
 }
 
-// AppendFilter appends filters used to skip tracing for matched messages (filter returns true).
-func AppendFilter(filter ...Filter) Option {
+// SetRequestFuncs Withs the functions to use for updating the span using the request message before processing is completed.
+func SetRequestFuncs(fns ...RequestFunc) Option {
 	return func(c *config) {
-		c.filters = append(c.filters, filter...)
+		c.requestFuncs = fns
+	}
+}
+
+// SetResponseFuncs Withs the functions to use for updating the span using the response message after processing is completed.
+func SetResponseFuncs(fns ...ResponseFunc) Option {
+	return func(c *config) {
+		c.responseFuncs = fns
 	}
 }
