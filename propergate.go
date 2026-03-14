@@ -8,6 +8,36 @@ import (
 	"github.com/miekg/dns"
 )
 
+func parseTraceparent(value string, opt *EDNS0_TRACE) bool {
+	if len(value) != 55 {
+		return false
+	}
+	if value[2] != '-' || value[35] != '-' || value[52] != '-' {
+		return false
+	}
+	v, err := hex.DecodeString(value[:2])
+	if err != nil || len(v) != 1 {
+		return false
+	}
+	opt.Version = v[0]
+	v, err = hex.DecodeString(value[3:35])
+	if err != nil || len(v) != 16 {
+		return false
+	}
+	copy(opt.TraceID[:], v)
+	v, err = hex.DecodeString(value[36:52])
+	if err != nil || len(v) != 8 {
+		return false
+	}
+	copy(opt.SpanID[:], v)
+	v, err = hex.DecodeString(value[53:55])
+	if err != nil || len(v) != 1 {
+		return false
+	}
+	opt.TraceFlags = v[0]
+	return true
+}
+
 type DNSMsgCarrier struct {
 	msg *dns.Msg
 }
@@ -41,17 +71,9 @@ func (c *DNSMsgCarrier) Set(key string, value string) {
 		// <trace-id> 32HEXDIGLC
 		// <parent-id> 16HEXDIGLC
 		// <trace-flags> 2HEXDIGLC
-		if len(value) < 55 {
+		if !parseTraceparent(value, opt) {
 			return
 		}
-		v, _ := hex.DecodeString(value[:2])
-		opt.Version = v[0]
-		v, _ = hex.DecodeString(value[3:35])
-		copy(opt.TraceID[:], v)
-		v, _ = hex.DecodeString(value[36:52])
-		copy(opt.SpanID[:], v)
-		v, _ = hex.DecodeString(value[53:55])
-		opt.TraceFlags = v[0]
 	}
 	if key == "tracestate" {
 		opt.Tracestate = []byte(value)
