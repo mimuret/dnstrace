@@ -67,6 +67,9 @@ func setupStdoutOTel(t *testing.T) *sdktrace.TracerProvider {
 		t.Fatal(err)
 	}
 	setupOTel(t, tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+	})
 	return tp
 }
 
