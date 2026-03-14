@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -57,7 +58,15 @@ func (c *Client) ExchangeWithConnContext(ctx context.Context, m *dns.Msg, conn *
 			return c.base.ExchangeWithConnContext(ctx, m, conn)
 		}
 	}
-	ctx, span := c.tracer.Start(ctx, c.operation, c.startSpanOpts...)
+	tracer := c.tracer
+	if tracer == nil {
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			tracer = newTracer(span.TracerProvider())
+		} else {
+			tracer = newTracer(otel.GetTracerProvider())
+		}
+	}
+	ctx, span := tracer.Start(ctx, c.operation, c.startSpanOpts...)
 	defer span.End()
 	carrier := NewDNSMsgCarrier(m)
 	c.propagator.Inject(ctx, carrier)

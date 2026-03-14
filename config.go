@@ -37,7 +37,7 @@ type config struct {
 
 func newConfig(opts []Option) *config {
 	c := &config{
-		tracer:        otel.GetTracerProvider().Tracer("dnstrace"),
+		tracer:        nil,
 		propagator:    otel.GetTextMapPropagator(),
 		requestFuncs:  []RequestFunc{SetRequestAttributes},
 		responseFuncs: []ResponseFunc{SetResponseAttributes},

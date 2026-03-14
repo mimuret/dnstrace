@@ -1,10 +1,9 @@
 package dnstrace
 
 import (
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
 
-func newTracer() trace.Tracer {
-	return otel.GetTracerProvider().Tracer("github.com/mimuret/dnstrace")
+func newTracer(tp trace.TracerProvider) trace.Tracer {
+	return tp.Tracer("github.com/mimuret/dnstrace")
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/miekg/dns"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -59,7 +60,7 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	tracer := h.tracer
 
 	if tracer == nil {
-		tracer = newTracer()
+		tracer = newTracer(otel.GetTracerProvider())
 	}
 
 	ctx, span := tracer.Start(ctx, h.operation, h.spanStartOpts...)
