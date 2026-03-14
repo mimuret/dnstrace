@@ -34,10 +34,10 @@ func SetRequestAttributes(span trace.Span, m *dns.Msg, serverAddr string, client
 			DNSQuestionType(m.Question[0].Qtype),
 		)
 	}
-	severHost, serverPort, err := SplitHostPort(serverAddr)
+	serverHost, serverPort, err := SplitHostPort(serverAddr)
 	if err == nil {
 		span.SetAttributes(
-			semconv.ServerAddress(severHost),
+			semconv.ServerAddress(serverHost),
 			semconv.ServerPort(serverPort),
 		)
 	}
