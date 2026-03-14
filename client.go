@@ -45,7 +45,7 @@ func (c *Client) ExchangeContext(ctx context.Context, m *dns.Msg, a string) (r *
 	if err != nil {
 		return nil, 0, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return c.ExchangeWithConnContext(ctx, m, conn)
 }
 
