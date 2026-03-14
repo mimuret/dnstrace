@@ -13,7 +13,7 @@ import (
 
 type Option func(*config)
 
-// Filter returns true when the message should be skipped from tracing.
+// Filter returns true when the message should be skipped from tracing and trace context propagation.
 type Filter func(m *dns.Msg) bool
 
 type RequestFunc func(span trace.Span, m *dns.Msg, serverAddr string, clientAddr string)
@@ -29,7 +29,7 @@ type config struct {
 	requestFuncs []RequestFunc
 	// responseFuncs are used to update the span using the response message after processing is completed.
 	responseFuncs []ResponseFunc
-	// filters are used to skip tracing for matched messages (filter returns true).
+	// filters are used to skip tracing and trace context propagation for matched messages (filter returns true).
 	filters []Filter
 	// spanStartOpts are used to set options when starting a span.
 	spanStartOpts []trace.SpanStartOption
@@ -71,7 +71,7 @@ func SetSpanStartOpts(opts ...trace.SpanStartOption) Option {
 	}
 }
 
-// WithFilters appends filters used to skip tracing for matched messages (filter returns true).
+// WithFilters appends filters used to skip tracing and trace context propagation for matched messages (filter returns true).
 func WithFilters(filters ...Filter) Option {
 	return func(c *config) {
 		c.filters = append(c.filters, filters...)
