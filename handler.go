@@ -34,6 +34,7 @@ func (h *handler) applyConfig(c *config) {
 	h.requestFuncs = c.requestFuncs
 	h.filters = c.filters
 	h.spanStartOpts = c.spanStartOpts
+	h.optionCode = c.optionCode
 }
 
 type handler struct {
@@ -45,6 +46,7 @@ type handler struct {
 	responseFuncs []ResponseFunc
 	filters       []Filter
 	spanStartOpts []trace.SpanStartOption
+	optionCode    uint16
 }
 
 func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -56,7 +58,7 @@ func (h *handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	ctx := context.Background()
-	ctx = h.propagator.Extract(ctx, NewDNSMsgCarrier(r))
+	ctx = h.propagator.Extract(ctx, NewDNSMsgCarrierWithCode(r, h.optionCode))
 
 	tracer := h.tracer
 

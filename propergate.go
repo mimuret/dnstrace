@@ -39,15 +39,22 @@ func parseTraceparent(value string, opt *EDNS0_TRACE) bool {
 }
 
 type DNSMsgCarrier struct {
-	msg *dns.Msg
+	msg        *dns.Msg
+	optionCode uint16
 }
 
+// NewDNSMsgCarrier returns a carrier that reads/writes EDNS0_TRACE under the default option code.
 func NewDNSMsgCarrier(m *dns.Msg) *DNSMsgCarrier {
-	return &DNSMsgCarrier{msg: m}
+	return NewDNSMsgCarrierWithCode(m, DefaultEDNS0TRACE)
+}
+
+// NewDNSMsgCarrierWithCode returns a carrier that reads/writes EDNS0_TRACE under the given option code.
+func NewDNSMsgCarrierWithCode(m *dns.Msg, code uint16) *DNSMsgCarrier {
+	return &DNSMsgCarrier{msg: m, optionCode: code}
 }
 
 func (c *DNSMsgCarrier) Get(key string) string {
-	opt := GetEDNS0_TRACE(c.msg)
+	opt := GetEDNS0_TRACEWithCode(c.msg, c.optionCode)
 	if opt == nil {
 		return ""
 	}
@@ -61,7 +68,7 @@ func (c *DNSMsgCarrier) Get(key string) string {
 }
 
 func (c *DNSMsgCarrier) Set(key string, value string) {
-	opt := GetEDNS0_TRACE(c.msg)
+	opt := GetEDNS0_TRACEWithCode(c.msg, c.optionCode)
 	if opt == nil {
 		opt = &EDNS0_TRACE{}
 	}
@@ -78,11 +85,11 @@ func (c *DNSMsgCarrier) Set(key string, value string) {
 	if key == "tracestate" {
 		opt.Tracestate = []byte(value)
 	}
-	SetEDNS0_TRACE(c.msg, opt)
+	SetEDNS0_TRACEWithCode(c.msg, opt, c.optionCode)
 }
 
 func (c *DNSMsgCarrier) Keys() []string {
-	if GetEDNS0_TRACE(c.msg) != nil {
+	if GetEDNS0_TRACEWithCode(c.msg, c.optionCode) != nil {
 		return []string{"traceparent", "tracestate"}
 	}
 	return nil

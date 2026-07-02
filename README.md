@@ -5,19 +5,28 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 dnstrace is a library for OpenTelemetry trace propagation over DNS.
-It propagates trace context using EDNS0 private-use option code 0xFDE9.
+It propagates trace context using an EDNS0 option, defaulting to option code
+65500 (0xFFDC) to match PowerDNS. The option code is configurable via
+`WithOptionCode`.
 
 ## EDNS0_TRACE specification
 
-EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using EDNS0 private-use option code 0xFDE9.
+EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using an
+EDNS0 option. The option code defaults to 65500 (0xFFDC), the same default used
+by PowerDNS, and can be overridden with `WithOptionCode`.
+
+The fixed 27-byte portion (version, reserved, trace-id, span-id, trace-flags) matches the
+`TRACEPARENT` EDNS option (`EDNSOTTraceRecord`) implemented by
+[PowerDNS](https://github.com/PowerDNS/pdns). `tracestate` is an optional trailing extension
+appended after that fixed portion.
 
 ```
 +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
-|                       OPTION-CODE (0xFDE9)                    |
+|                    OPTION-CODE (default 65500)                |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 |                       OPTION-LENGTH (2byte)                   |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
-|          VERSION(1byte)       |       TRACE-FLAGS(1byte)      |
+|          VERSION(1byte)       |        RESERVED(1byte)        |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 |                                                               |
 |                                                               |
@@ -33,17 +42,18 @@ EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using EDN
 |                       SPAN-ID(8 byte)                         |
 |                                                               |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
-|                       TRACE-STATE...                          |
+|       TRACE-FLAGS(1byte)      |        TRACE-STATE...         |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 ```
 
-- `OPTION-CODE`: EDNS0 option code0
+- `OPTION-CODE`: EDNS0 option code (default 65500 / 0xFFDC, configurable via `WithOptionCode`)
 - `OPTION-LENGTH`: EDNS0 option length
 - `VERSION`: traceparent version
-- `TRACE-FLAGS`: traceparent trace-flags
+- `RESERVED`: reserved byte (must be 0), for alignment with PowerDNS
 - `TRACE-ID`: traceparent trace-id
 - `SPAN-ID`: traceparent span-id
-- `TRACE-STATE`: ASCII string for tracestate
+- `TRACE-FLAGS`: traceparent trace-flags
+- `TRACE-STATE`: ASCII string for tracestate (optional)
 
 `traceparent` and `tracestate` follow the [Trace Context](https://www.w3.org/TR/trace-context/) specification.
 
@@ -64,6 +74,16 @@ See [dnstrace_test.go](dnstrace_test.go) for details.
 - Wrap `dns.Client` with `dnstrace.NewClient`.
 - Pass a `context.Context` containing trace context via `ExchangeContext` or `ExchangeWithConnContext`.
 - If the `context.Context` contains trace context, EDNS0_TRACE is added. If EDNS0_TRACE already exists, it is overwritten.
+
+### Changing the option code
+
+The EDNS0 option code defaults to 65500 (0xFFDC) for compatibility with PowerDNS.
+Pass `dnstrace.WithOptionCode` to `NewHandler` / `NewClient` to use a different code
+(both ends must agree):
+
+```go
+client := dnstrace.NewClient("sent-query", &dns.Client{}, dnstrace.WithOptionCode(0xFDE9))
+```
 
 ## License
 
