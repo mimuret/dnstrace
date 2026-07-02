@@ -32,6 +32,7 @@ type Client struct {
 
 	filters       []Filter
 	startSpanOpts []trace.SpanStartOption
+	optionCode    uint16
 }
 
 func (c *Client) applyConfig(config *config) {
@@ -41,6 +42,7 @@ func (c *Client) applyConfig(config *config) {
 	c.responseFuncs = config.responseFuncs
 	c.filters = config.filters
 	c.startSpanOpts = config.spanStartOpts
+	c.optionCode = config.optionCode
 }
 
 func (c *Client) ExchangeContext(ctx context.Context, m *dns.Msg, a string) (r *dns.Msg, rtt time.Duration, err error) {
@@ -68,7 +70,7 @@ func (c *Client) ExchangeWithConnContext(ctx context.Context, m *dns.Msg, conn *
 	}
 	ctx, span := tracer.Start(ctx, c.operation, c.startSpanOpts...)
 	defer span.End()
-	carrier := NewDNSMsgCarrier(m)
+	carrier := NewDNSMsgCarrierWithCode(m, c.optionCode)
 	c.propagator.Inject(ctx, carrier)
 	for _, f := range c.requestFuncs {
 		f(span, m, conn.RemoteAddr().String(), conn.LocalAddr().String())

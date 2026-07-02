@@ -33,6 +33,8 @@ type config struct {
 	filters []Filter
 	// spanStartOpts are used to set options when starting a span.
 	spanStartOpts []trace.SpanStartOption
+	// optionCode is the EDNS0 option code used to carry the trace context.
+	optionCode uint16
 }
 
 func newConfig(opts []Option) *config {
@@ -43,6 +45,7 @@ func newConfig(opts []Option) *config {
 		responseFuncs: []ResponseFunc{SetResponseAttributes},
 		filters:       nil,
 		spanStartOpts: nil,
+		optionCode:    DefaultEDNS0TRACE,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -54,6 +57,14 @@ func newConfig(opts []Option) *config {
 func WithTracer(tracer trace.Tracer) Option {
 	return func(c *config) {
 		c.tracer = tracer
+	}
+}
+
+// WithOptionCode sets the EDNS0 option code used to carry the trace context.
+// Defaults to DefaultEDNS0TRACE (65500), matching the PowerDNS TRACEPARENT option code.
+func WithOptionCode(code uint16) Option {
+	return func(c *config) {
+		c.optionCode = code
 	}
 }
 

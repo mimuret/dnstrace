@@ -64,6 +64,50 @@ func TestEDNS0_TRACE_WireLayout(t *testing.T) {
 	}
 }
 
+// TestEDNS0TRACE_DefaultOptionCode verifies the default option code matches the
+// PowerDNS TRACEPARENT default (65500).
+func TestEDNS0TRACE_DefaultOptionCode(t *testing.T) {
+	if DefaultEDNS0TRACE != 65500 {
+		t.Fatalf("default option code: got %d want 65500", DefaultEDNS0TRACE)
+	}
+	if EDNS0TRACE != DefaultEDNS0TRACE {
+		t.Fatalf("EDNS0TRACE alias mismatch: %d != %d", EDNS0TRACE, DefaultEDNS0TRACE)
+	}
+}
+
+// TestEDNS0TRACE_CustomOptionCode verifies that a custom option code is honored
+// and that a trace stored under a different code is not visible under another.
+func TestEDNS0TRACE_CustomOptionCode(t *testing.T) {
+	const custom uint16 = 0xFDE9
+
+	in := &EDNS0_TRACE{
+		TraceID:    [16]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+		SpanID:     [8]byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
+		TraceFlags: 0x01,
+	}
+
+	m := new(dns.Msg)
+	SetEDNS0_TRACEWithCode(m, in, custom)
+
+	// The option must be stored under the custom code.
+	if got := GetEDNS0_TRACEWithCode(m, custom); got == nil {
+		t.Fatal("trace not found under custom option code")
+	} else if got.Traceparent() != in.Traceparent() {
+		t.Fatalf("traceparent mismatch: %s != %s", got.Traceparent(), in.Traceparent())
+	}
+
+	// It must not be visible under the default code.
+	if got := GetEDNS0_TRACE(m); got != nil {
+		t.Fatal("trace under custom code must not be visible under the default code")
+	}
+
+	// The carrier must honor the configured option code as well.
+	c := NewDNSMsgCarrierWithCode(m, custom)
+	if c.Get("traceparent") != in.Traceparent() {
+		t.Fatalf("carrier traceparent mismatch: %q", c.Get("traceparent"))
+	}
+}
+
 func TestGetEDNS0_TRACE_MalformedLocalData(t *testing.T) {
 	m := new(dns.Msg)
 	o := &dns.OPT{}

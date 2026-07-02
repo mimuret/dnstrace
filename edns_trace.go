@@ -10,7 +10,17 @@ import (
 )
 
 const (
-	EDNS0TRACE = 0xFDE9
+	// DefaultEDNS0TRACE is the default EDNS0 option code used to carry the trace
+	// context. It matches the default TRACEPARENT option code (65500) used by
+	// PowerDNS. The option code can be overridden with WithOptionCode (or the
+	// *WithCode helpers below).
+	DefaultEDNS0TRACE uint16 = 65500 // 0xFFDC
+
+	// EDNS0TRACE is a deprecated alias for DefaultEDNS0TRACE.
+	//
+	// Deprecated: use DefaultEDNS0TRACE.
+	EDNS0TRACE = DefaultEDNS0TRACE
+
 	// traceparentBytes is the size of the fixed portion of the wire format:
 	// 1 byte version, 1 byte reserved, 16 bytes trace-id, 8 bytes span-id, 1 byte trace-flags.
 	// This layout matches the TRACEPARENT EDNS option used by PowerDNS (EDNSOTTraceRecord).
@@ -43,7 +53,7 @@ func (e *EDNS0_TRACE) Traceparent() string {
 	return fmt.Sprintf("%02x-%s-%s-%02x", e.Version, e.TraceID, e.SpanID, e.TraceFlags)
 }
 
-func (e *EDNS0_TRACE) Option() uint16 { return EDNS0TRACE }
+func (e *EDNS0_TRACE) Option() uint16 { return DefaultEDNS0TRACE }
 func (e *EDNS0_TRACE) pack() ([]byte, error) {
 	b := make([]byte, 0, traceparentBytes+len(e.Tracestate))
 	b = append(b, e.Version)
@@ -54,10 +64,10 @@ func (e *EDNS0_TRACE) pack() ([]byte, error) {
 	b = append(b, e.Tracestate...)
 	return b, nil
 }
-func (e *EDNS0_TRACE) packLocal() *dns.EDNS0_LOCAL {
+func (e *EDNS0_TRACE) packLocal(code uint16) *dns.EDNS0_LOCAL {
 	data, _ := e.pack()
 	return &dns.EDNS0_LOCAL{
-		Code: EDNS0TRACE,
+		Code: code,
 		Data: data,
 	}
 }
@@ -74,7 +84,13 @@ func (e *EDNS0_TRACE) unpackLocal(opt *dns.EDNS0_LOCAL) error {
 	return nil
 }
 
+// GetEDNS0_TRACE returns the EDNS0_TRACE carried under the default option code.
 func GetEDNS0_TRACE(m *dns.Msg) *EDNS0_TRACE {
+	return GetEDNS0_TRACEWithCode(m, DefaultEDNS0TRACE)
+}
+
+// GetEDNS0_TRACEWithCode returns the EDNS0_TRACE carried under the given option code.
+func GetEDNS0_TRACEWithCode(m *dns.Msg, code uint16) *EDNS0_TRACE {
 	var (
 		opt *dns.OPT
 		ok  bool
@@ -88,7 +104,7 @@ func GetEDNS0_TRACE(m *dns.Msg) *EDNS0_TRACE {
 		return nil
 	}
 	for _, eopt := range opt.Option {
-		if eopt.Option() == EDNS0TRACE {
+		if eopt.Option() == code {
 			if optLocal, ok := eopt.(*dns.EDNS0_LOCAL); ok {
 				trace := &EDNS0_TRACE{}
 				if err := trace.unpackLocal(optLocal); err != nil {
@@ -101,11 +117,17 @@ func GetEDNS0_TRACE(m *dns.Msg) *EDNS0_TRACE {
 	return nil
 }
 
+// SetEDNS0_TRACE sets the EDNS0_TRACE under the default option code.
 func SetEDNS0_TRACE(m *dns.Msg, traceOpt *EDNS0_TRACE) {
+	SetEDNS0_TRACEWithCode(m, traceOpt, DefaultEDNS0TRACE)
+}
+
+// SetEDNS0_TRACEWithCode sets the EDNS0_TRACE under the given option code.
+func SetEDNS0_TRACEWithCode(m *dns.Msg, traceOpt *EDNS0_TRACE, code uint16) {
 	var (
 		opt      *dns.OPT
 		ok       bool
-		localOpt = traceOpt.packLocal()
+		localOpt = traceOpt.packLocal(code)
 	)
 	for _, rr := range m.Extra {
 		if opt, ok = rr.(*dns.OPT); ok {
@@ -121,7 +143,7 @@ func SetEDNS0_TRACE(m *dns.Msg, traceOpt *EDNS0_TRACE) {
 		return
 	}
 	for i, eopt := range opt.Option {
-		if eopt.Option() == EDNS0TRACE {
+		if eopt.Option() == code {
 			opt.Option[i] = localOpt
 			return
 		}
