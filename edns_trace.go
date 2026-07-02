@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	EDNS0TRACE       = 0xFDE9
-	traceparentBytes = 1 + 16 + 8 + 1
+	EDNS0TRACE = 0xFDE9
+	// traceparentBytes is the size of the fixed portion of the wire format:
+	// 1 byte version, 1 byte reserved, 16 bytes trace-id, 8 bytes span-id, 1 byte trace-flags.
+	// This layout matches the TRACEPARENT EDNS option used by PowerDNS (EDNSOTTraceRecord).
+	traceparentBytes = 1 + 1 + 16 + 8 + 1
 )
 
 type TraceID [16]byte
@@ -28,6 +31,7 @@ func (s SpanID) String() string {
 
 type EDNS0_TRACE struct {
 	Version    byte    `json:"version"`
+	Reserved   byte    `json:"reserved"`
 	TraceID    TraceID `json:"trace_id"`
 	SpanID     SpanID  `json:"span_id"`
 	TraceFlags byte    `json:"trace_flags"`
@@ -43,9 +47,10 @@ func (e *EDNS0_TRACE) Option() uint16 { return EDNS0TRACE }
 func (e *EDNS0_TRACE) pack() ([]byte, error) {
 	b := make([]byte, 0, traceparentBytes+len(e.Tracestate))
 	b = append(b, e.Version)
-	b = append(b, e.TraceFlags)
+	b = append(b, e.Reserved)
 	b = append(b, e.TraceID[:]...)
 	b = append(b, e.SpanID[:]...)
+	b = append(b, e.TraceFlags)
 	b = append(b, e.Tracestate...)
 	return b, nil
 }
@@ -61,10 +66,11 @@ func (e *EDNS0_TRACE) unpackLocal(opt *dns.EDNS0_LOCAL) error {
 		return errors.New("dnstrace: bad EDNS0_TRACE length")
 	}
 	e.Version = opt.Data[0]
-	e.TraceFlags = opt.Data[1]
+	e.Reserved = opt.Data[1]
 	copy(e.TraceID[:], opt.Data[2:18])
 	copy(e.SpanID[:], opt.Data[18:26])
-	e.Tracestate = opt.Data[26:]
+	e.TraceFlags = opt.Data[26]
+	e.Tracestate = opt.Data[27:]
 	return nil
 }
 

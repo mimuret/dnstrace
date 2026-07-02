@@ -11,13 +11,18 @@ It propagates trace context using EDNS0 private-use option code 0xFDE9.
 
 EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using EDNS0 private-use option code 0xFDE9.
 
+The fixed 27-byte portion (version, reserved, trace-id, span-id, trace-flags) matches the
+`TRACEPARENT` EDNS option (`EDNSOTTraceRecord`) implemented by
+[PowerDNS](https://github.com/PowerDNS/pdns). `tracestate` is an optional trailing extension
+appended after that fixed portion.
+
 ```
 +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
 |                       OPTION-CODE (0xFDE9)                    |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 |                       OPTION-LENGTH (2byte)                   |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
-|          VERSION(1byte)       |       TRACE-FLAGS(1byte)      |
+|          VERSION(1byte)       |        RESERVED(1byte)        |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 |                                                               |
 |                                                               |
@@ -33,17 +38,18 @@ EDNS0_TRACE is a format for propagating `traceparent` and `tracestate` using EDN
 |                       SPAN-ID(8 byte)                         |
 |                                                               |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
-|                       TRACE-STATE...                          |
+|       TRACE-FLAGS(1byte)      |        TRACE-STATE...         |
 +---+---+---+---+---+---+---+---|---+---+---+---+---+---+---+---+
 ```
 
-- `OPTION-CODE`: EDNS0 option code0
+- `OPTION-CODE`: EDNS0 option code
 - `OPTION-LENGTH`: EDNS0 option length
 - `VERSION`: traceparent version
-- `TRACE-FLAGS`: traceparent trace-flags
+- `RESERVED`: reserved byte (must be 0), for alignment with PowerDNS
 - `TRACE-ID`: traceparent trace-id
 - `SPAN-ID`: traceparent span-id
-- `TRACE-STATE`: ASCII string for tracestate
+- `TRACE-FLAGS`: traceparent trace-flags
+- `TRACE-STATE`: ASCII string for tracestate (optional)
 
 `traceparent` and `tracestate` follow the [Trace Context](https://www.w3.org/TR/trace-context/) specification.
 
