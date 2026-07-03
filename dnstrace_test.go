@@ -465,6 +465,9 @@ func assertHasDefaultAttributes(t *testing.T, span sdktrace.ReadOnlySpan) {
 	if !hasAttribute(span.Attributes(), "dns.request.type") {
 		t.Fatal("default request attribute dns.request.type is missing")
 	}
+	if !hasAttribute(span.Attributes(), "dns.request.opcode") {
+		t.Fatal("default request attribute dns.request.opcode is missing")
+	}
 	if !hasAttribute(span.Attributes(), "dns.response.code") {
 		t.Fatal("default response attribute dns.response.code is missing")
 	}

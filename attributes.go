@@ -27,7 +27,18 @@ func DNSResponseCode(val int) attribute.KeyValue {
 	return attribute.String("dns.response.code", rcode)
 }
 
+func DNSOpcode(val int) attribute.KeyValue {
+	opcode, ok := dns.OpcodeToString[val]
+	if !ok {
+		opcode = "OTHER"
+	}
+	return attribute.String("dns.request.opcode", opcode)
+}
+
 func SetRequestAttributes(span trace.Span, m *dns.Msg, serverAddr string, clientAddr string) {
+	span.SetAttributes(
+		DNSOpcode(m.Opcode),
+	)
 	if len(m.Question) > 0 {
 		qname := m.Question[0].Name
 		span.SetAttributes(
