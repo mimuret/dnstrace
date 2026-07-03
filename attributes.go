@@ -19,6 +19,22 @@ func DNSQuestionType(val uint16) attribute.KeyValue {
 	return attribute.String("dns.request.type", qtype)
 }
 
+func DNSQuestionClass(val uint16) attribute.KeyValue {
+	qclass, ok := dns.ClassToString[val]
+	if !ok {
+		qclass = "OTHER"
+	}
+	return attribute.String("dns.request.class", qclass)
+}
+
+func DNSOpcode(val int) attribute.KeyValue {
+	opcode, ok := dns.OpcodeToString[val]
+	if !ok {
+		opcode = "OTHER"
+	}
+	return attribute.String("dns.opcode", opcode)
+}
+
 func DNSResponseCode(val int) attribute.KeyValue {
 	rcode, ok := dns.RcodeToString[val]
 	if !ok {
@@ -28,11 +44,13 @@ func DNSResponseCode(val int) attribute.KeyValue {
 }
 
 func SetRequestAttributes(span trace.Span, m *dns.Msg, serverAddr string, clientAddr string) {
+	span.SetAttributes(DNSOpcode(m.Opcode))
 	if len(m.Question) > 0 {
 		qname := m.Question[0].Name
 		span.SetAttributes(
 			semconv.DNSQuestionName(qname),
 			DNSQuestionType(m.Question[0].Qtype),
+			DNSQuestionClass(m.Question[0].Qclass),
 		)
 	}
 	serverHost, serverPort, err := SplitHostPort(serverAddr)
